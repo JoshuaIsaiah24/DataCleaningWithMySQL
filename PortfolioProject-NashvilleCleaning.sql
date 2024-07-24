@@ -1,22 +1,20 @@
 -- Standardize Date Format
--- I have uploaded the dataset via LOAD DATA INFILE. So I have already fixed the date format to YYYY/MM/DD which is standard to MySQL
--- In case you want to change the date format you can run the following query below:
+-- The dataset has been loaded using LOAD DATA INFILE with the date format YYYY/MM/DD, which is standard for MySQL.
+-- If you need to convert the date format to YYYY-MM-DD, you can use the following queries:
 
--- SELECT SaleDate, STR_TO_DATE(SaleDate, '%Y-%M-%D') as ConvertedDate
+-- View the conversion
+-- SELECT SaleDate, STR_TO_DATE(SaleDate, '%Y/%m/%d') AS ConvertedDate
 -- FROM NashvilleHousing;
 
+-- Update the date format
 -- UPDATE NashvilleHousing
--- SET SaleDate = STR_TO_DATE(SaleDate, '%Y-%M-%D');
+-- SET SaleDate = STR_TO_DATE(SaleDate, '%Y/%m/%d');
 
--- or you can also create a new column to add a the converted date from text to the correct data type
+-- Alternatively, create a new column for the converted date
+-- SET SQL_SAFE_UPDATES = 0;
 
-
-SET SQL_SAFE_UPDATES = 0;
-
-
--- MySQL doesn't turn blank datas into NULL
--- So I need to make sure that the workbench will show NULL for blank when we execute the query
-
+-- Replace blank fields with NULL
+-- MySQL does not automatically convert blank fields to NULL, so we need to handle this manually.
 UPDATE NashvilleHousing
 SET 
     UniqueID = CASE WHEN TRIM(UniqueID) = '' THEN NULL ELSE UniqueID END,
@@ -39,133 +37,99 @@ SET
     FullBath = CASE WHEN TRIM(FullBath) = '' THEN NULL ELSE FullBath END,
     HalfBath = CASE WHEN TRIM(HalfBath) = '' THEN NULL ELSE HalfBath END;
 
--- Populate Property Address Data
-
+-- Populate Missing Property Address Data
+-- Identify and update missing PropertyAddress values using duplicates with non-null addresses.
 SELECT *
-FROM nashvillehousing
--- WHERE PropertyAddress is NULL;
+FROM NashvilleHousing
+-- WHERE PropertyAddress IS NULL;
 ORDER BY ParcelID;
 
--- In this query, we have duplicate parcel ids but different unique ids that has the null values on property address
--- We want to make sure that we get the correct address and update it to the null value
+-- Find duplicates with missing addresses
+-- Join the table with itself to find records with the same ParcelID but different UniqueID.
+-- Use COALESCE to select the non-null PropertyAddress.
+SELECT tableA.ParcelID, tableA.PropertyAddress, tableB.ParcelID, tableB.PropertyAddress, COALESCE(tableA.PropertyAddress, tableB.PropertyAddress) AS CorrectPropertyAddress
+FROM NashvilleHousing AS TableA
+JOIN NashvilleHousing AS TableB
+    ON TableA.ParcelID = TableB.ParcelID
+    AND TableA.UniqueID <> TableB.UniqueID
+WHERE TableA.PropertyAddress IS NULL;
 
--- this query we're performing self join to check the duplicate IDs with null values.
--- we are using the COALESCE function to show the PropertyAddress on a new column.
-SELECT tableA.ParcelID, tableA.PropertyAddress, tableB.ParcelID, tableB.PropertyAddress, COALESCE(tableA.PropertyAddress, tableB.PropertyAddress) as CorrectPropertyAddress
-FROM NashvilleHousing TableA
-JOIN NashvilleHousing TableB
-	on tableA.ParcelID = tableB.ParcelID
-    and tableA.UniqueID <> tableB.UniqueID;
-WHERE TableA.PropertyAddress is NULL;
-
--- updating the null values with the correct address
--- after performing the query below, if you run the select statement above, it should no longer show any output.
--- Thus, removing all the null values in Property address with duplicate parcels but different unique IDs.
-UPDATE NashvilleHousing TableA
-JOIN NashvilleHousing TableB
+-- Update PropertyAddress with correct values
+-- Update null PropertyAddress fields with values from duplicates.
+UPDATE NashvilleHousing AS TableA
+JOIN NashvilleHousing AS TableB
     ON TableA.ParcelID = TableB.ParcelID
     AND TableA.UniqueID <> TableB.UniqueID
 SET TableA.PropertyAddress = COALESCE(TableA.PropertyAddress, TableB.PropertyAddress)
 WHERE TableA.PropertyAddress IS NULL;
 
--- breaking out Address into individual columns (address, city, state) for PropertyAddress:
-
+-- Split PropertyAddress into Address and City
+-- Break down PropertyAddress into individual components.
 SELECT 
     SUBSTRING_INDEX(PropertyAddress, ',', 1) AS Address,
     TRIM(SUBSTRING_INDEX(PropertyAddress, ',', -1)) AS City
 FROM NashvilleHousing;
 
--- Updating the table with the split stress address and city
-
+-- Add new columns and update with split data
 ALTER TABLE NashvilleHousing
-ADD PropertySplitAddress VARCHAR (255);
-
-ALTER TABLE NashvilleHousing
-ADD PropertySplitCity VARCHAR (255);
+ADD PropertySplitAddress VARCHAR(255),
+ADD PropertySplitCity VARCHAR(255);
 
 UPDATE NashvilleHousing
-SET PropertySplitAddress = SUBSTRING_INDEX(PropertyAddress, ',', 1);
+SET PropertySplitAddress = SUBSTRING_INDEX(PropertyAddress, ',', 1),
+    PropertySplitCity = TRIM(SUBSTRING_INDEX(PropertyAddress, ',', -1));
 
-UPDATE NashvilleHousing
-SET PropertySplitCity = TRIM(SUBSTRING_INDEX(PropertyAddress, ',', -1));
-
-
--- doing the same for the OwnerAddress:
-
+-- Repeat for OwnerAddress
+-- Break down OwnerAddress into Street, City, and State components.
 SELECT 
-TRIM(SUBSTRING_INDEX(OwnerAddress, ',', 1)) AS OwnerAddressSplitStreet,
-TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(OwnerAddress, ',', -2), ',', 1)) AS OwnerAddressSplitCity,
-TRIM(SUBSTRING_INDEX(OwnerAddress, ',', -1)) AS OwnerAddressSplitState
-FROM nashvillehousing;
-
--- updating the table
-
-ALTER TABLE NashvilleHousing
-ADD OwnerAddressSplitStreet VARCHAR (255);
-
-ALTER TABLE NashvilleHousing
-ADD OwnerAddressSplitCity VARCHAR (255);
-
-ALTER TABLE NashvilleHousing
-ADD OwnerAddressSplitState VARCHAR (255);
-
-UPDATE NashvilleHousing
-SET OwnerAddressSplitStreet = TRIM(SUBSTRING_INDEX(OwnerAddress, ',', 1));
-
-UPDATE NashvilleHousing
-SET OwnerAddressSplitCity = TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(OwnerAddress, ',', -2), ',', 1));
-
-UPDATE NashvilleHousing
-SET OwnerAddressSplitState = TRIM(SUBSTRING_INDEX(OwnerAddress, ',', -1));
-
-
--- Change Y and N to Yes and No in "Sold as Vacant" field:
-
--- checking the distinct values in the column
-SELECT Distinct(SoldAsVacant), Count(SoldAsVacant)
-FROM NashvilleHousing
-Group by SoldAsVacant
-Order by 2;
-
--- Making a case statement that will allow us to change the Y to Yes and N and to No
-SELECT SoldAsVacant,
-CASE
-	When SoldAsVacant = 'Y' then 'Yes'
-    When SoldAsVacant = 'N' then 'No'
-    Else SoldAsVacant
-END as Adjusted
+    TRIM(SUBSTRING_INDEX(OwnerAddress, ',', 1)) AS OwnerAddressSplitStreet,
+    TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(OwnerAddress, ',', -2), ',', 1)) AS OwnerAddressSplitCity,
+    TRIM(SUBSTRING_INDEX(OwnerAddress, ',', -1)) AS OwnerAddressSplitState
 FROM NashvilleHousing;
 
--- Updating the table
-UPDATE nashvillehousing
+-- Add new columns and update with split data
+ALTER TABLE NashvilleHousing
+ADD OwnerAddressSplitStreet VARCHAR(255),
+ADD OwnerAddressSplitCity VARCHAR(255),
+ADD OwnerAddressSplitState VARCHAR(255);
+
+UPDATE NashvilleHousing
+SET OwnerAddressSplitStreet = TRIM(SUBSTRING_INDEX(OwnerAddress, ',', 1)),
+    OwnerAddressSplitCity = TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(OwnerAddress, ',', -2), ',', 1)),
+    OwnerAddressSplitState = TRIM(SUBSTRING_INDEX(OwnerAddress, ',', -1));
+
+-- Standardize SoldAsVacant Values
+-- Convert 'Y'/'N' to 'Yes'/'No'.
+SELECT DISTINCT SoldAsVacant, COUNT(SoldAsVacant)
+FROM NashvilleHousing
+GROUP BY SoldAsVacant
+ORDER BY 2;
+
+-- Apply the conversion
+UPDATE NashvilleHousing
 SET SoldAsVacant = CASE
-	When SoldAsVacant = 'Y' then 'Yes'
-    When SoldAsVacant = 'N' then 'No'
-    Else SoldAsVacant
+    WHEN SoldAsVacant = 'Y' THEN 'Yes'
+    WHEN SoldAsVacant = 'N' THEN 'No'
+    ELSE SoldAsVacant
 END;
 
--- Remove Duplicates:
-
+-- Remove Duplicate Records
+-- Use a Common Table Expression (CTE) to identify duplicates and remove them.
 WITH RowNumCTE AS (
 SELECT *,
-	row_number() OVER(
-    partition by ParcelID,
-				PropertyAddress,
-                SalePrice,
-                SaleDate,
-                LegalReference
-                Order by
-					UniqueID) as row_num
-FROM nashvillehousing
+    ROW_NUMBER() OVER (
+        PARTITION BY ParcelID, PropertyAddress, SalePrice, SaleDate, LegalReference
+        ORDER BY UniqueID
+    ) AS row_num
+FROM NashvilleHousing
 )
 
+-- Check for duplicates
 SELECT *
 FROM RowNumCTE
 WHERE row_num > 1;
 
--- In MySQL, you cannot delete directly from the CTE created (in this case RowNumCTE)
--- What you can do is to run a subquery to identify the rows based on the row numbers assigned in the CTE
--- In this case, UniqueID will be used to get the rows out from RowNumCTE
+-- Delete duplicate records
 DELETE
 FROM NashvilleHousing
 WHERE UniqueID IN (
@@ -177,11 +141,9 @@ WHERE UniqueID IN (
     ) AS Subquery
 );
 
-
--- Delete unused columns
--- Since we no longer need the OwnerAddress and PropertyAddress, we can delete those together with the TaxDistrict
-
+-- Drop Unused Columns
+-- Remove columns that are no longer needed.
 ALTER TABLE NashvilleHousing
-DROP COLUMN OwnerAddress, 
-DROP COLUMN TaxDistrict, 
+DROP COLUMN OwnerAddress,
+DROP COLUMN TaxDistrict,
 DROP COLUMN PropertyAddress;
