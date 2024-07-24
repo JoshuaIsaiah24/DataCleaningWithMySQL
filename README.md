@@ -38,4 +38,4 @@ This repository contains scripts and procedures for cleaning and standardizing t
 
 # Contact
 
-For questions or contributions, please contact [Joshua] at [Joshuaisaiah.caballero@gmail.com]
+For questions or contributions, please contact me at [Joshuaisaiah.caballero@gmail.com]
